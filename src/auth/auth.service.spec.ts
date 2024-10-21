@@ -4,7 +4,7 @@ import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { HashService } from '../common/services/hash.service';
 import { TokenService } from './providers/token.service';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { User } from '../users/schemas/user.schema';
 
 describe('AuthService', () => {
@@ -125,40 +125,43 @@ describe('AuthService', () => {
     it('should generate and save tokens', async () => {
       const tokens = {
         accessToken: 'access-token',
-        refreshToken: 'refresh-token',
+        refreshToken: 'refresh-token.with.signature',
       };
 
       jest.spyOn(tokenService, 'generateTokens').mockResolvedValue(tokens);
-      jest.spyOn(hashService, 'hash').mockResolvedValue('hashed-refresh-token');
+      jest.spyOn(hashService, 'hash').mockResolvedValue('hashed-refresh-token-signature');
 
       const result = await authService.generateAndSaveTokens(mockUser);
 
       expect(result).toEqual(tokens);
-      expect(usersService.updateRefreshToken).toHaveBeenCalledWith(mockUser.id, 'hashed-refresh-token');
+      expect(tokenService.generateTokens).toHaveBeenCalledWith(mockUser.id, mockUser.email);
+      expect(hashService.hash).toHaveBeenCalledWith('signature');
+      expect(usersService.updateRefreshToken).toHaveBeenCalledWith(mockUser.id, 'hashed-refresh-token-signature');
     });
   });
 
   describe('refreshTokens', () => {
     it('should refresh tokens if refresh token is valid', async () => {
-      const tokens = {
+      const oldRefreshToken = 'old.refresh.token';
+      const newTokens = {
         accessToken: 'new-access-token',
-        refreshToken: 'new-refresh-token',
+        refreshToken: 'new.refresh.token',
       };
 
       jest.spyOn(tokenService, 'isRefreshTokenValid').mockResolvedValue(true);
-      jest.spyOn(tokenService, 'generateTokens').mockResolvedValue(tokens);
-      jest.spyOn(hashService, 'hash').mockResolvedValue('new-hashed-refresh-token');
+      jest.spyOn(authService as any, 'generateAndSaveTokens').mockResolvedValue(newTokens);
 
-      const result = await authService.refreshTokens(mockUser, 'old-refresh-token');
+      const result = await authService.refreshTokens(mockUser, oldRefreshToken);
 
-      expect(result).toEqual(tokens);
-      expect(usersService.updateRefreshToken).toHaveBeenCalledWith(mockUser.id, 'new-hashed-refresh-token');
+      expect(result).toEqual(newTokens);
+      expect(tokenService.isRefreshTokenValid).toHaveBeenCalledWith(mockUser, 'token');
+      expect(authService['generateAndSaveTokens']).toHaveBeenCalledWith(mockUser);
     });
 
     it('should throw ForbiddenException if refresh token is invalid', async () => {
       jest.spyOn(tokenService, 'isRefreshTokenValid').mockResolvedValue(false);
 
-      await expect(authService.refreshTokens(mockUser, 'invalid-refresh-token')).rejects.toThrow('Access Denied');
+      await expect(authService.refreshTokens(mockUser, 'invalid.refresh.token')).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -167,6 +170,16 @@ describe('AuthService', () => {
       await authService.logout('userId');
 
       expect(usersService.updateRefreshToken).toHaveBeenCalledWith('userId', null);
+    });
+  });
+
+  describe('extractRefreshTokenSignature', () => {
+    it('should extract the signature from a refresh token', () => {
+      const refreshToken = 'header.payload.signature';
+
+      const result = (authService as any).extractRefreshTokenSignature(refreshToken);
+
+      expect(result).toBe('signature');
     });
   });
 });
