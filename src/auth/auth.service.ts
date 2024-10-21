@@ -34,7 +34,10 @@ export class AuthService {
 
   async generateAndSaveTokens(user: User) {
     const tokens = await this.tokenService.generateTokens(user.id, user.email);
-    const hashedRefreshToken = await this.hashService.hash(tokens.refreshToken);
+
+    const refreshTokenSignature = this.extractRefreshTokenSignature(tokens.refreshToken);
+
+    const hashedRefreshToken = await this.hashService.hash(refreshTokenSignature);
 
     await this.usersService.updateRefreshToken(user.id, hashedRefreshToken);
 
@@ -42,12 +45,18 @@ export class AuthService {
   }
 
   async refreshTokens(user: User, refreshToken: string) {
-    const isMatch = await this.tokenService.isRefreshTokenValid(user, refreshToken);
-    if (!isMatch) {
+    const refreshTokenSignature = this.extractRefreshTokenSignature(refreshToken);
+
+    const isValid = await this.tokenService.isRefreshTokenValid(user, refreshTokenSignature);
+    if (!isValid) {
       throw new ForbiddenException('Access Denied');
     }
 
     return this.generateAndSaveTokens(user);
+  }
+
+  private extractRefreshTokenSignature(refreshToken: string): string {
+    return refreshToken.split('.')[2];
   }
 
   async logout(userId: string) {
